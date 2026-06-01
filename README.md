@@ -13,7 +13,7 @@ The container currently supports these environment variables:
 | `FAKE_IP_RANGE` | Fake-IP pool used by `dns.fake-ip-range` | `198.18.0.0/15` | `10.202.0.0/15` |
 | `FAKE_IP_TTL` | Fake-IP TTL used by `dns.fake-ip-ttl` | `1` | `60` |
 | `LOGLEVEL` | Mihomo `log-level` in generated config | `error` | `warning` |
-| `FAKE_IP_FILTER` | Optional CSV list converted to `dns.fake-ip-filter` YAML list | empty | `localhost,*.lan,*.local` |
+| `FAKE_IP_FILTER` | Optional CSV list converted to a YAML-quoted `dns.fake-ip-filter` list | empty | `localhost,*.lan,*.local` |
 | `NAMESERVER_POLICY` | Optional CSV `domain#dns` list converted to `dns.nameserver-policy` | empty | `*.example.com#tls://9.9.9.9:853` |
 
 Current generated DNS defaults (fixed in `entrypoint.sh`, no env override):
@@ -31,7 +31,8 @@ NAMESERVER_POLICY="domain1#dns1,domain2#dns2"
 ```
 
 - Elements are separated by commas.
-- Inside each element, one `#` separates `domain` and upstream `dns`.
+- Inside each element, exactly one `#` separates `domain` and upstream `dns`.
+- Empty `domain` or `dns` values are rejected during container startup.
 - Upstream examples: `1.1.1.1`, `tls://9.9.9.9:853`.
 
 Examples:
@@ -42,7 +43,7 @@ NAMESERVER_POLICY="service.example#tls://9.9.9.9:853,updates.example.net#tls://9
 NAMESERVER_POLICY="video.example#1.1.1.1,*.example.org#1.1.1.1"
 ```
 
-> **Warning**: There is no strict format validation yet. Incorrect input can generate invalid YAML/configuration, so keep the exact `domain#dns` CSV format.
+> **Note**: Invalid `NAMESERVER_POLICY` entries stop startup instead of generating a broken configuration.
 
 ## Example Usage
 
