@@ -86,12 +86,6 @@ add key=NAMESERVER_POLICY list=fakeip value="*.example.com#tls://9.9.9.9:853"
 /container/add remote-image="ghcr.io/alexanderek/mikrotik-mihomo-fakeip:latest" envlists=fakeip interface=fakeip root-dir=Containers/fakeip start-on-boot=yes
 ```
 
-or
-
-```bash
-/container/add remote-image="registry-1.docker.io/alexanderek/mikrotik-mihomo-fakeip:latest" envlists=fakeip interface=fakeip root-dir=Containers/fakeip start-on-boot=yes
-```
-
 > **Note**: Depending on RouterOS version, CLI may show `envlists` or `envlist`; use tab-completion.
 > **Note**: Published tags are `latest` and versioned `vX.Y.Z` multi-arch images. The amd64 image is built with `GOAMD64=v3` for modern x86_64 systems, `linux/arm64` targets RB5009, and `linux/arm/v7` targets RB4011.
 

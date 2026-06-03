@@ -64,34 +64,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Detect Docker Hub credentials
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
-            echo "PUSH_DOCKERHUB=true" >> $GITHUB_ENV
-            echo "PUSH_DOCKERHUB=true"
-          else
-            echo "PUSH_DOCKERHUB=false" >> $GITHUB_ENV
-            echo "PUSH_DOCKERHUB=false"
-          fi
-
-      # 5. Логинимся в Docker Hub
-      - name: Login to Docker Hub
-        if: ${{ env.PUSH_DOCKERHUB == 'true' }}
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      # 6. Устанавливаем переменные
+      # 5. Устанавливаем переменные
       - name: Set variables
         id: vars
         run: |
           echo "BUILDTIME=$(date)" >> $GITHUB_ENV
 
-      # 7. Сборка и пуш multi-arch: amd64 uses GOAMD64=v3, arm64/armv7 are RouterOS targets
+      # 6. Сборка и пуш multi-arch: amd64 uses GOAMD64=v3, arm64/armv7 are RouterOS targets
       - name: Build and push mihomo multi-arch
         uses: docker/build-push-action@v7
         with:
@@ -106,12 +85,6 @@ jobs:
           tags: |
             ghcr.io/alexanderek/mikrotik-mihomo-fakeip:latest
             ghcr.io/alexanderek/mikrotik-mihomo-fakeip:${{ env.VERSION }}
-
-      - name: Publish tags to Docker Hub (copy from GHCR)
-        if: ${{ env.PUSH_DOCKERHUB == 'true' }}
-        run: |
-          docker buildx imagetools create -t alexanderek/mikrotik-mihomo-fakeip:latest ghcr.io/${PACKAGE_OWNER}/${PACKAGE_NAME}:latest
-          docker buildx imagetools create -t alexanderek/mikrotik-mihomo-fakeip:${VERSION} ghcr.io/${PACKAGE_OWNER}/${PACKAGE_NAME}:${VERSION}
 
       - name: Log in to GHCR with crane
         run: echo "${GITHUB_TOKEN}" | crane auth login ghcr.io -u ${PACKAGE_OWNER} --password-stdin
