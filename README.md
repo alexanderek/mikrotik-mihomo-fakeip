@@ -93,7 +93,7 @@ or
 ```
 
 > **Note**: Depending on RouterOS version, CLI may show `envlists` or `envlist`; use tab-completion.
-> **Note**: Published CPU-specific tags include `amd64v1` and `amd64v2` (also versioned tags like `vX.Y.Z-amd64v1` and `vX.Y.Z-amd64v2`); check tags in GHCR (`ghcr.io/alexanderek/mikrotik-mihomo-fakeip`) or Docker Hub (`alexanderek/mikrotik-mihomo-fakeip`).
+> **Note**: Published tags are `latest` and versioned `vX.Y.Z` multi-arch images. The amd64 image is built with `GOAMD64=v3` for modern x86_64 systems, `linux/arm64` targets RB5009, and `linux/arm/v7` targets RB4011.
 
 ### 6. Add a route for fake IPs to the container’s gateway
 

@@ -91,55 +91,7 @@ jobs:
         run: |
           echo "BUILDTIME=$(date)" >> $GITHUB_ENV
 
-      # 7. Сборка и пуш AMD64_v1
-      - name: Build and push mihomo AMD64_v1
-        uses: docker/build-push-action@v4
-        with:
-          context: ./
-          file: ./Dockerfile
-          platforms: linux/amd64
-          push: true
-          build-args: |
-            TAG=${{ env.VERSION }}
-            BUILDTIME=${{ env.BUILDTIME }}
-            AMD64VERSION=v1
-          tags: |
-            ghcr.io/alexanderek/mikrotik-mihomo-fakeip:amd64v1
-            ghcr.io/alexanderek/mikrotik-mihomo-fakeip:${{ env.VERSION }}-amd64v1
-
-      # 8. Сборка и пуш AMD64_v2
-      - name: Build and push mihomo AMD64_v2
-        uses: docker/build-push-action@v4
-        with:
-          context: ./
-          file: ./Dockerfile
-          platforms: linux/amd64
-          push: true
-          build-args: |
-            TAG=${{ env.VERSION }}
-            BUILDTIME=${{ env.BUILDTIME }}
-            AMD64VERSION=v2
-          tags: |
-            ghcr.io/alexanderek/mikrotik-mihomo-fakeip:amd64v2
-            ghcr.io/alexanderek/mikrotik-mihomo-fakeip:${{ env.VERSION }}-amd64v2
-
-      # 8. Сборка и пуш AMD64_v4
-      - name: Build and push mihomo AMD64_v4
-        uses: docker/build-push-action@v4
-        with:
-          context: ./
-          file: ./Dockerfile
-          platforms: linux/amd64
-          push: true
-          build-args: |
-            TAG=${{ env.VERSION }}
-            BUILDTIME=${{ env.BUILDTIME }}
-            AMD64VERSION=v4
-          tags: |
-            ghcr.io/alexanderek/mikrotik-mihomo-fakeip:amd64v4
-            ghcr.io/alexanderek/mikrotik-mihomo-fakeip:${{ env.VERSION }}-amd64v4
-
-      # 9. Сборка и пуш multi-arch (AMD64_v3) + latest
+      # 7. Сборка и пуш multi-arch: amd64 uses GOAMD64=v3, arm64/armv7 are RouterOS targets
       - name: Build and push mihomo multi-arch
         uses: docker/build-push-action@v4
         with:
@@ -158,12 +110,6 @@ jobs:
       - name: Publish tags to Docker Hub (copy from GHCR)
         if: ${{ env.PUSH_DOCKERHUB == 'true' }}
         run: |
-          docker buildx imagetools create -t alexanderek/mikrotik-mihomo-fakeip:amd64v1 ghcr.io/${PACKAGE_OWNER}/${PACKAGE_NAME}:amd64v1
-          docker buildx imagetools create -t alexanderek/mikrotik-mihomo-fakeip:${VERSION}-amd64v1 ghcr.io/${PACKAGE_OWNER}/${PACKAGE_NAME}:${VERSION}-amd64v1
-          docker buildx imagetools create -t alexanderek/mikrotik-mihomo-fakeip:amd64v2 ghcr.io/${PACKAGE_OWNER}/${PACKAGE_NAME}:amd64v2
-          docker buildx imagetools create -t alexanderek/mikrotik-mihomo-fakeip:${VERSION}-amd64v2 ghcr.io/${PACKAGE_OWNER}/${PACKAGE_NAME}:${VERSION}-amd64v2
-          docker buildx imagetools create -t alexanderek/mikrotik-mihomo-fakeip:amd64v4 ghcr.io/${PACKAGE_OWNER}/${PACKAGE_NAME}:amd64v4
-          docker buildx imagetools create -t alexanderek/mikrotik-mihomo-fakeip:${VERSION}-amd64v4 ghcr.io/${PACKAGE_OWNER}/${PACKAGE_NAME}:${VERSION}-amd64v4
           docker buildx imagetools create -t alexanderek/mikrotik-mihomo-fakeip:latest ghcr.io/${PACKAGE_OWNER}/${PACKAGE_NAME}:latest
           docker buildx imagetools create -t alexanderek/mikrotik-mihomo-fakeip:${VERSION} ghcr.io/${PACKAGE_OWNER}/${PACKAGE_NAME}:${VERSION}
 
