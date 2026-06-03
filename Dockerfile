@@ -2,10 +2,14 @@
 FROM --platform=$BUILDPLATFORM golang:alpine AS builder
 ARG TARGETOS
 ARG TARGETARCH
-ARG TAG 
+ARG TAG=v1.19.26
+ARG MIHOMO_REF=fc8c5a24b16991f98cd736950c17d1aa306a5041
 ARG WITH_GVISOR=0  # 1 - включить тег with_gvisor
 ARG BUILDTIME
 ARG AMD64VERSION
+
+RUN test -n "$TAG" || { echo "TAG build arg must not be empty"; exit 1; }
+RUN test -n "$MIHOMO_REF" || { echo "MIHOMO_REF build arg must not be empty"; exit 1; }
 
 # Устанавливаем зависимости
 RUN apk add --no-cache git make
@@ -15,8 +19,13 @@ RUN mkdir -p /final
 RUN git clone https://github.com/MetaCubeX/mihomo.git /src
 WORKDIR /src
 
-# Переключаемся на нужный тэг
-RUN git switch $TAG --detach
+# Переключаемся на pinned upstream ref и проверяем, что version tag ему соответствует.
+RUN resolved_ref=$(git rev-parse "${TAG}^{commit}") && \
+    test "$resolved_ref" = "$MIHOMO_REF" || { \
+      echo "TAG ${TAG} resolves to ${resolved_ref}, expected pinned MIHOMO_REF ${MIHOMO_REF}"; \
+      exit 1; \
+    } && \
+    git switch "$MIHOMO_REF" --detach
 RUN echo "Updating version.go with TAG=${TAG}-fakeip-ros and BUILDTIME=${BUILDTIME}" && \
     sed -i "s|Version\s*=.*|Version = \"${TAG}-fakeip-ros\"|" constant/version.go && \
     sed -i "s|BuildTime\s*=.*|BuildTime = \"${BUILDTIME}\"|" constant/version.go

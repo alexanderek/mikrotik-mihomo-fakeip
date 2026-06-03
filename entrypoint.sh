@@ -1,28 +1,10 @@
 #!/bin/sh
 
-if ! lsmod | grep nf_tables >/dev/null 2>&1; then
-  if ! apk info -e iptables iptables-legacy >/dev/null 2>&1; then
-    echo "Install iptables"
-    apk add --no-cache iptables iptables-legacy >/dev/null 2>&1 || exit 1
-    rm -f /usr/sbin/iptables /usr/sbin/iptables-save /usr/sbin/iptables-restore || exit 1
-    ln -s /usr/sbin/iptables-legacy /usr/sbin/iptables || exit 1
-    ln -s /usr/sbin/iptables-legacy-save /usr/sbin/iptables-save || exit 1
-    ln -s /usr/sbin/iptables-legacy-restore /usr/sbin/iptables-restore || exit 1
-  fi
-else
-  if ! apk info -e nftables >/dev/null 2>&1; then
-    echo "Install nftables"
-    apk add --no-cache nftables >/dev/null 2>&1 || exit 1
-  fi
-  if apk info -e iptables iptables-legacy >/dev/null 2>&1; then
-    echo "Delete iptables"
-    apk del iptables iptables-legacy >/dev/null 2>&1 || exit 1
-  fi
-fi
-
 FAKE_IP_RANGE="${FAKE_IP_RANGE:-198.18.0.0/15}"
 FAKE_IP_FILTER="${FAKE_IP_FILTER:-}"
 FAKE_IP_TTL="${FAKE_IP_TTL:-1}"
+BLOCK_QUIC="${BLOCK_QUIC:-off}"
+INBOUND_MODE="${INBOUND_MODE:-auto}"
 MIHOMO_CONFIG_DIR="${MIHOMO_CONFIG_DIR:-/root/.config/mihomo}"
 MIHOMO_BIN="${MIHOMO_BIN:-./mihomo}"
 
@@ -114,6 +96,89 @@ generate_nameserver_policy() {
   return 0
 }
 
+generate_quic_rules() {
+  case "$BLOCK_QUIC" in
+    off)
+      return 0
+      ;;
+    youtube)
+      echo "  - AND,((NETWORK,udp),(DST-PORT,443),(DOMAIN-SUFFIX,googlevideo.com)),REJECT"
+      ;;
+    all)
+      echo "  - AND,((NETWORK,udp),(DST-PORT,443)),REJECT"
+      ;;
+  esac
+}
+
+validate_env() {
+  case "$BLOCK_QUIC" in
+    off|youtube|all) ;;
+    *)
+      echo "Invalid BLOCK_QUIC '$BLOCK_QUIC': expected off, youtube, or all" >&2
+      return 1
+      ;;
+  esac
+
+  case "$INBOUND_MODE" in
+    auto|tun|tproxy) ;;
+    *)
+      echo "Invalid INBOUND_MODE '$INBOUND_MODE': expected auto, tun, or tproxy" >&2
+      return 1
+      ;;
+  esac
+}
+
+select_inbound_mode() {
+  case "$INBOUND_MODE" in
+    tun|tproxy)
+      printf '%s\n' "$INBOUND_MODE"
+      ;;
+    auto)
+      if lsmod | grep -q '^nft_tproxy'; then
+        printf '%s\n' tproxy
+      else
+        printf '%s\n' tun
+      fi
+      ;;
+  esac
+}
+
+prepare_iptables_legacy() {
+  if ! apk info -e iptables iptables-legacy >/dev/null 2>&1; then
+    echo "Install iptables"
+    apk add --no-cache iptables iptables-legacy >/dev/null 2>&1 || return 1
+    rm -f /usr/sbin/iptables /usr/sbin/iptables-save /usr/sbin/iptables-restore || return 1
+    ln -s /usr/sbin/iptables-legacy /usr/sbin/iptables || return 1
+    ln -s /usr/sbin/iptables-legacy-save /usr/sbin/iptables-save || return 1
+    ln -s /usr/sbin/iptables-legacy-restore /usr/sbin/iptables-restore || return 1
+  fi
+}
+
+prepare_nftables() {
+  if ! apk info -e nftables >/dev/null 2>&1; then
+    echo "Install nftables"
+    apk add --no-cache nftables >/dev/null 2>&1 || return 1
+  fi
+  if apk info -e iptables iptables-legacy >/dev/null 2>&1; then
+    echo "Delete iptables"
+    apk del iptables iptables-legacy >/dev/null 2>&1 || return 1
+  fi
+}
+
+prepare_network_tools() {
+  mode=$1
+  if [ "$mode" = "tproxy" ]; then
+    prepare_nftables
+    return
+  fi
+
+  if lsmod | grep nf_tables >/dev/null 2>&1; then
+    prepare_nftables
+  else
+    prepare_iptables_legacy
+  fi
+}
+
 first_iface() {
   ip -o link show | awk -F': ' '/link\/ether/ {print $2}' | cut -d'@' -f1 | head -n1
 }
@@ -167,6 +232,9 @@ listeners:
     udp: true
 
 rules:
+EOF
+generate_quic_rules >> "${MIHOMO_CONFIG_DIR}/config.yaml" || return 1
+cat >> "${MIHOMO_CONFIG_DIR}/config.yaml" <<EOF
   - MATCH,DIRECT
 
 EOF
@@ -222,7 +290,9 @@ listeners:
     mtu: 1500
 
 rules:
-  - AND,((NETWORK,udp),(DST-PORT,443),(DOMAIN-SUFFIX,googlevideo.com)),REJECT
+EOF
+generate_quic_rules >> "${MIHOMO_CONFIG_DIR}/config.yaml" || return 1
+cat >> "${MIHOMO_CONFIG_DIR}/config.yaml" <<EOF
   - MATCH,DIRECT
 EOF
 }
@@ -241,7 +311,7 @@ table inet mihomo_tproxy {
     chain prerouting {
         type filter hook prerouting priority filter; policy accept;
         ip daddr ${FAKE_IP_RANGE} meta l4proto { tcp, udp } iifname "${iface}" meta mark set 0x00000001 tproxy ip to 127.0.0.1:12345 accept
-        ip daddr { ${iface_ip}, 0.0.0.0/8, 127.0.0.0/8, 224.0.0.0/4, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 192.0.0.0/24, 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24, 192.88.99.0/24, 198.18.0.0/15, 224.0.0.0/3 } return
+        ip daddr { ${iface_ip}, 0.0.0.0/8, 127.0.0.0/8, 224.0.0.0/4, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 192.0.0.0/24, 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24, 192.88.99.0/24, ${FAKE_IP_RANGE}, 224.0.0.0/3 } return
         meta l4proto { tcp, udp } iifname "${iface}" meta mark set 0x00000001 tproxy ip to 127.0.0.1:12345 accept
     }
 
@@ -257,12 +327,15 @@ ip route replace local 0.0.0.0/0 dev lo table 100 || return 1
 
 run() {
 mkdir -p "${MIHOMO_CONFIG_DIR}"
-if lsmod | grep -q '^nft_tproxy'; then
-   echo "nft_tproxy module loaded, use inbound TPROXY"
+validate_env || return 1
+mode=$(select_inbound_mode)
+prepare_network_tools "$mode" || return 1
+if [ "$mode" = "tproxy" ]; then
+   echo "use inbound TPROXY"
    nft_rules || return 1
    config_file_mihomo_tproxy || return 1
 else
-   echo "nft_tproxy not loaded, use inbound TUN with TCP redirect"
+   echo "use inbound TUN with TCP redirect"
    config_file_mihomo_tun || return 1
 fi
 exec "${MIHOMO_BIN}"

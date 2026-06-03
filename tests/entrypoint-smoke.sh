@@ -5,11 +5,15 @@ repo_root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
 
+default_fake_ip_range="198.18.0.0/15"
 stub_dir="$tmpdir/bin"
 mkdir -p "$stub_dir"
 
 cat > "$stub_dir/lsmod" <<'EOF'
 #!/bin/sh
+if [ -n "${TEST_LSMOD_OUTPUT:-}" ]; then
+  printf '%s\n' "$TEST_LSMOD_OUTPUT"
+fi
 exit 0
 EOF
 
@@ -35,6 +39,18 @@ fi
 exit 0
 EOF
 
+cat > "$stub_dir/nft" <<'EOF'
+#!/bin/sh
+if [ "$1" = "flush" ] && [ "$2" = "ruleset" ]; then
+  exit 0
+fi
+if [ "$1" = "-f" ] && [ "$2" = "-" ]; then
+  cat > "$TEST_OUTPUT_NFT"
+  exit 0
+fi
+exit 1
+EOF
+
 cat > "$stub_dir/mihomo" <<'EOF'
 #!/bin/sh
 test -f "$MIHOMO_CONFIG_DIR/config.yaml"
@@ -42,7 +58,7 @@ cp "$MIHOMO_CONFIG_DIR/config.yaml" "$TEST_OUTPUT_CONFIG"
 touch "$TEST_EXEC_MARKER"
 EOF
 
-chmod +x "$stub_dir/lsmod" "$stub_dir/apk" "$stub_dir/ip" "$stub_dir/mihomo"
+chmod +x "$stub_dir/lsmod" "$stub_dir/apk" "$stub_dir/ip" "$stub_dir/nft" "$stub_dir/mihomo"
 
 assert_contains() {
   file=$1
@@ -75,8 +91,9 @@ run_case() {
     MIHOMO_CONFIG_DIR="$case_dir/config"
     MIHOMO_BIN="$stub_dir/mihomo"
     TEST_OUTPUT_CONFIG="$case_dir/config.yaml"
+    TEST_OUTPUT_NFT="$case_dir/nft.rules"
     TEST_EXEC_MARKER="$case_dir/executed"
-    export PATH MIHOMO_CONFIG_DIR MIHOMO_BIN TEST_OUTPUT_CONFIG TEST_EXEC_MARKER
+    export PATH MIHOMO_CONFIG_DIR MIHOMO_BIN TEST_OUTPUT_CONFIG TEST_OUTPUT_NFT TEST_EXEC_MARKER
     "$@" sh "$repo_root/entrypoint.sh" >"$case_dir/stdout" 2>"$case_dir/stderr"
   )
   test -f "$case_dir/executed"
@@ -84,16 +101,40 @@ run_case() {
 }
 
 base_config=$(run_case base env \
-  FAKE_IP_RANGE=10.200.0.0/15 \
+  FAKE_IP_RANGE="$default_fake_ip_range" \
   FAKE_IP_TTL=60 \
   LOGLEVEL=error)
 assert_contains "$base_config" "log-level: error"
-assert_contains "$base_config" "fake-ip-range: 10.200.0.0/15"
+assert_contains "$base_config" "fake-ip-range: $default_fake_ip_range"
 assert_contains "$base_config" "fake-ip-ttl: 60"
 assert_contains "$base_config" "type: tun"
 assert_contains "$base_config" "      - eth0"
 assert_not_contains "$base_config" "fake-ip-filter:"
 assert_not_contains "$base_config" "nameserver-policy:"
+assert_not_contains "$base_config" "googlevideo.com"
+assert_not_contains "$base_config" "DST-PORT,443)),REJECT"
+
+youtube_tun_config=$(run_case youtube-tun env \
+  BLOCK_QUIC=youtube)
+assert_contains "$youtube_tun_config" "  - AND,((NETWORK,udp),(DST-PORT,443),(DOMAIN-SUFFIX,googlevideo.com)),REJECT"
+
+tproxy_config=$(run_case tproxy env \
+  INBOUND_MODE=tproxy \
+  FAKE_IP_RANGE=198.19.0.0/16 \
+  BLOCK_QUIC=youtube)
+tproxy_nft=$(dirname "$tproxy_config")/nft.rules
+assert_contains "$tproxy_config" "type: tproxy"
+assert_contains "$tproxy_config" "fake-ip-range: 198.19.0.0/16"
+assert_contains "$tproxy_config" "  - AND,((NETWORK,udp),(DST-PORT,443),(DOMAIN-SUFFIX,googlevideo.com)),REJECT"
+assert_contains "$tproxy_nft" "ip daddr 198.19.0.0/16 meta l4proto { tcp, udp }"
+assert_contains "$tproxy_nft" "198.19.0.0/16"
+assert_not_contains "$tproxy_nft" "198.18.0.0/15"
+
+all_quic_config=$(run_case all-quic env \
+  INBOUND_MODE=tproxy \
+  BLOCK_QUIC=all)
+assert_contains "$all_quic_config" "  - AND,((NETWORK,udp),(DST-PORT,443)),REJECT"
+assert_not_contains "$all_quic_config" "googlevideo.com"
 
 filter_config=$(run_case filter env \
   FAKE_IP_FILTER="localhost, *.lan,it's.local")
@@ -117,9 +158,10 @@ set +e
   MIHOMO_CONFIG_DIR="$invalid_dir/config"
   MIHOMO_BIN="$stub_dir/mihomo"
   TEST_OUTPUT_CONFIG="$invalid_dir/config.yaml"
+  TEST_OUTPUT_NFT="$invalid_dir/nft.rules"
   TEST_EXEC_MARKER="$invalid_dir/executed"
   NAMESERVER_POLICY="broken-policy"
-  export PATH MIHOMO_CONFIG_DIR MIHOMO_BIN TEST_OUTPUT_CONFIG TEST_EXEC_MARKER NAMESERVER_POLICY
+  export PATH MIHOMO_CONFIG_DIR MIHOMO_BIN TEST_OUTPUT_CONFIG TEST_OUTPUT_NFT TEST_EXEC_MARKER NAMESERVER_POLICY
   sh "$repo_root/entrypoint.sh" >"$invalid_dir/stdout" 2>"$invalid_dir/stderr"
 )
 status=$?

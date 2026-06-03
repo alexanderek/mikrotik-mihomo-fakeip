@@ -10,17 +10,37 @@ The container currently supports these environment variables:
 
 | Variable | What it does | Default | Example |
 |---|---|---|---|
-| `FAKE_IP_RANGE` | Fake-IP pool used by `dns.fake-ip-range` | `198.18.0.0/15` | `10.202.0.0/15` |
+| `FAKE_IP_RANGE` | Fake-IP pool used by `dns.fake-ip-range` | `198.18.0.0/15` | `198.18.0.0/15` |
 | `FAKE_IP_TTL` | Fake-IP TTL used by `dns.fake-ip-ttl` | `1` | `60` |
 | `LOGLEVEL` | Mihomo `log-level` in generated config | `error` | `warning` |
 | `FAKE_IP_FILTER` | Optional CSV list converted to a YAML-quoted `dns.fake-ip-filter` list | empty | `localhost,*.lan,*.local` |
 | `NAMESERVER_POLICY` | Optional CSV `domain#dns` list converted to `dns.nameserver-policy` | empty | `*.example.com#tls://9.9.9.9:853` |
+| `BLOCK_QUIC` | Optional UDP/443 reject policy in Mihomo rules | `off` | `youtube` |
+| `INBOUND_MODE` | Inbound mode selector: `auto`, `tun`, or `tproxy` | `auto` | `tproxy` |
+
+`198.18.0.0/15` is the reserved RFC2544 benchmarking range and is Mihomo's
+default fake-ip pool. Avoid RFC1918 ranges such as `10.0.0.0/8` for fake IPs:
+they can overlap real LAN/VPN addresses.
 
 Current generated DNS defaults (fixed in `entrypoint.sh`, no env override):
 - `dns.listen: 0.0.0.0:53`
 - `dns.enhanced-mode: fake-ip`
 - `dns.default-nameserver: [8.8.8.8, 9.9.9.9, 1.1.1.1]`
 - `ipv6: false`
+
+## DNS listener contract
+
+The container listens for DNS on `0.0.0.0:53`, which means RouterOS reaches it
+on the container interface IP. In `enhanced-mode: fake-ip`, matching downstream
+DNS forwarder queries receive addresses from `FAKE_IP_RANGE`.
+
+Downstream RouterOS DNS forwarders and health checks should target the container
+interface IP and should expect fake-ip answers inside `FAKE_IP_RANGE`.
+
+WG egress-failover integration puts this container into a single egress routing
+table and is documented separately in the `wg-failover` repository. The
+standalone `fakeip` routing table below is an illustration for independent
+deployments, not the failover integration contract.
 
 ## NAMESERVER_POLICY (dns.nameserver-policy)
 
@@ -44,6 +64,27 @@ NAMESERVER_POLICY="video.example#1.1.1.1,*.example.org#1.1.1.1"
 ```
 
 > **Note**: Invalid `NAMESERVER_POLICY` entries stop startup instead of generating a broken configuration.
+
+## BLOCK_QUIC
+
+`BLOCK_QUIC` controls optional UDP/443 reject rules in the generated Mihomo
+config. It is disabled by default and is unrelated to failover decisions.
+
+- `off`: do not reject QUIC.
+- `youtube`: reject UDP/443 only for `DOMAIN-SUFFIX,googlevideo.com`. This can
+  force TCP fallback for YouTube/video traffic through a tunnel.
+- `all`: reject all UDP/443 traffic.
+
+The same policy is applied in both `tun` and `tproxy` inbound modes.
+
+## INBOUND_MODE
+
+`INBOUND_MODE` controls how the container chooses the Mihomo inbound mode:
+
+- `auto`: use the legacy runtime heuristic and select `tproxy` when `nft_tproxy`
+  is visible from inside the container; otherwise select `tun`.
+- `tun`: force TUN inbound.
+- `tproxy`: force nftables TPROXY inbound.
 
 ## Example Usage
 
@@ -76,6 +117,7 @@ Set required variables, then optionally add `FAKE_IP_FILTER` and `NAMESERVER_POL
 add key=FAKE_IP_RANGE list=fakeip value=198.18.0.0/15
 add key=LOGLEVEL list=fakeip value=error
 add key=FAKE_IP_TTL list=fakeip value=1
+add key=BLOCK_QUIC list=fakeip value=off
 add key=FAKE_IP_FILTER list=fakeip value="localhost,*.lan,*.local"
 add key=NAMESERVER_POLICY list=fakeip value="*.example.com#tls://9.9.9.9:853"
 ```
