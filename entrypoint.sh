@@ -23,6 +23,8 @@ fi
 FAKE_IP_RANGE="${FAKE_IP_RANGE:-198.18.0.0/15}"
 FAKE_IP_FILTER="${FAKE_IP_FILTER:-}"
 FAKE_IP_TTL="${FAKE_IP_TTL:-1}"
+MIHOMO_CONFIG_DIR="${MIHOMO_CONFIG_DIR:-/root/.config/mihomo}"
+MIHOMO_BIN="${MIHOMO_BIN:-./mihomo}"
 
 trim() {
   printf '%s' "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
@@ -43,6 +45,7 @@ generate_fake_ip_filter() {
 
   IFS=','
   printed=0
+  # shellcheck disable=SC2086 # intentional CSV splitting with globbing disabled
   for raw in $FAKE_IP_FILTER; do
     item=$(trim "$raw")
     [ -z "$item" ] && continue
@@ -70,6 +73,7 @@ generate_nameserver_policy() {
 
   IFS=','
   printed=0
+  # shellcheck disable=SC2086 # intentional CSV splitting with globbing disabled
   for raw in $NAMESERVER_POLICY; do
     item=$(trim "$raw")
     [ -z "$item" ] && continue
@@ -124,7 +128,7 @@ require_first_iface() {
 }
 
 config_file_mihomo_tproxy() {
-cat > /root/.config/mihomo/config.yaml << EOF
+cat > "${MIHOMO_CONFIG_DIR}/config.yaml" << EOF
 log-level: ${LOGLEVEL:-error}
 ipv6: false
 dns:
@@ -143,9 +147,9 @@ dns:
   fake-ip-range: ${FAKE_IP_RANGE}
   fake-ip-ttl: ${FAKE_IP_TTL}
 EOF
-generate_fake_ip_filter >> /root/.config/mihomo/config.yaml || return 1
-generate_nameserver_policy >> /root/.config/mihomo/config.yaml || return 1
-cat >> /root/.config/mihomo/config.yaml <<EOF
+generate_fake_ip_filter >> "${MIHOMO_CONFIG_DIR}/config.yaml" || return 1
+generate_nameserver_policy >> "${MIHOMO_CONFIG_DIR}/config.yaml" || return 1
+cat >> "${MIHOMO_CONFIG_DIR}/config.yaml" <<EOF
   nameserver:
     - https://dns.google/dns-query
     - https://cloudflare-dns.com/dns-query
@@ -169,7 +173,7 @@ EOF
 }
 config_file_mihomo_tun() {
 iface=$(require_first_iface) || return 1
-cat > /root/.config/mihomo/config.yaml << EOF
+cat > "${MIHOMO_CONFIG_DIR}/config.yaml" << EOF
 log-level: ${LOGLEVEL:-error}
 ipv6: false
 dns:
@@ -188,9 +192,9 @@ dns:
   fake-ip-range: ${FAKE_IP_RANGE}
   fake-ip-ttl: ${FAKE_IP_TTL}
 EOF
-generate_fake_ip_filter >> /root/.config/mihomo/config.yaml || return 1
-generate_nameserver_policy >> /root/.config/mihomo/config.yaml || return 1
-cat >> /root/.config/mihomo/config.yaml <<EOF
+generate_fake_ip_filter >> "${MIHOMO_CONFIG_DIR}/config.yaml" || return 1
+generate_nameserver_policy >> "${MIHOMO_CONFIG_DIR}/config.yaml" || return 1
+cat >> "${MIHOMO_CONFIG_DIR}/config.yaml" <<EOF
   nameserver:
     - https://dns.google/dns-query
     - https://cloudflare-dns.com/dns-query
@@ -252,7 +256,7 @@ ip route replace local 0.0.0.0/0 dev lo table 100 || return 1
 }
 
 run() {
-mkdir -p /root/.config/mihomo
+mkdir -p "${MIHOMO_CONFIG_DIR}"
 if lsmod | grep -q '^nft_tproxy'; then
    echo "nft_tproxy module loaded, use inbound TPROXY"
    nft_rules || return 1
@@ -261,7 +265,7 @@ else
    echo "nft_tproxy not loaded, use inbound TUN with TCP redirect"
    config_file_mihomo_tun || return 1
 fi
-exec ./mihomo
+exec "${MIHOMO_BIN}"
 }
 
 run || exit 1
