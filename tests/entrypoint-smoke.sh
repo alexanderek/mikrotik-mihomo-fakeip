@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+repo_root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
 
@@ -70,6 +70,7 @@ run_case() {
   case_dir="$tmpdir/$name"
   mkdir -p "$case_dir/config"
   (
+    # shellcheck disable=SC2030
     PATH="$stub_dir:$PATH"
     MIHOMO_CONFIG_DIR="$case_dir/config"
     MIHOMO_BIN="$stub_dir/mihomo"
@@ -111,6 +112,7 @@ invalid_dir="$tmpdir/invalid-policy"
 mkdir -p "$invalid_dir/config"
 set +e
 (
+  # shellcheck disable=SC2031
   PATH="$stub_dir:$PATH"
   MIHOMO_CONFIG_DIR="$invalid_dir/config"
   MIHOMO_BIN="$stub_dir/mihomo"
