@@ -215,3 +215,16 @@ dig @<ROUTER_DNS_IP> service.example
 # RouterOS DNS cache check:
 /ip dns cache print where name~"service.example"
 ```
+
+5. For a live HTTP end-to-end check, prefer `neverssl.com`. It is intentionally plain HTTP and avoids confusing failures from HTTPS redirects or CDN behavior.
+
+```bash
+# RouterOS DNS direct-to-container check:
+:put [:resolve neverssl.com server=<CONTAINER_IP>]
+
+# RouterOS fake-ip traffic check:
+# Replace <FAKE_IP> with the address returned by the resolve command.
+/tool/fetch url="http://<FAKE_IP>/" http-header-field="Host: neverssl.com" output=none duration=15s
+```
+
+The returned fake IP should be inside `FAKE_IP_RANGE`, and Mihomo logs should show a TCP flow to `neverssl.com:80`.
