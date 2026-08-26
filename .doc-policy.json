@@ -5,8 +5,8 @@
     "cli"
   ],
   "bundle": {
-    "version": "1.0.0",
-    "sha256": "486f7fa3e5e0db655e187d4457a79623efa10a0d1da0e6a8b69aedcea44ce6ae"
+    "version": "1.0.1",
+    "sha256": "186658c84555ceb4851bd3dd59b487872ef98aabff4228e3eca453a2c76a2ca1"
   },
   "docs": [
     "README.md"
