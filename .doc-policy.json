@@ -1,12 +1,11 @@
 {
   "schema_version": 1,
   "repo_types": [
-    "deployable-application",
-    "cli"
+    "deployable-application"
   ],
   "bundle": {
-    "version": "1.0.1",
-    "sha256": "186658c84555ceb4851bd3dd59b487872ef98aabff4228e3eca453a2c76a2ca1"
+    "version": "1.0.3",
+    "sha256": "f2b6d56a51a6f7fc0c61c5c614d17e8cf6d171fa5f27df7ee07d47d3e971825c"
   },
   "docs": [
     "README.md"
