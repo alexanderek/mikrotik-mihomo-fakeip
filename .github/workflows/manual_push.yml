@@ -1,7 +1,16 @@
 name: Manual Build and Publish Multi-Arch Docker Images
 
 on:
-  workflow_dispatch: # Ручной запуск
+  workflow_dispatch:
+    inputs:
+      mihomo_tag:
+        description: Stable upstream tag (exact vX.Y.Z)
+        required: true
+        type: string
+      mihomo_ref:
+        description: Full lowercase 40-character commit SHA resolved by that tag
+        required: true
+        type: string
 
 jobs:
   check-and-build:
@@ -11,14 +20,37 @@ jobs:
       packages: write # Для GHCR
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Для gh api
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Замени на ${{ secrets.PACKAGE_TOKEN }} для PAT
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       PACKAGE_OWNER: alexanderek
       PACKAGE_NAME: mikrotik-mihomo-fakeip # Имя пакета с / для action
       PACKAGE_NAME_ENCODED: mikrotik-mihomo-fakeip # Экранированное имя для API
       DELETE_UNTAGGED: "true" # "true" для удаления, "false" для dry-run
 
     steps:
-      # 1. Установка jq для парсинга JSON и crane
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Validate release inputs
+        shell: bash
+        env:
+          INPUT_MIHOMO_TAG: ${{ inputs.mihomo_tag }}
+          INPUT_MIHOMO_REF: ${{ inputs.mihomo_ref }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$INPUT_MIHOMO_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "mihomo_tag must be an exact stable vX.Y.Z tag" >&2
+            exit 1
+          fi
+          if [[ ! "$INPUT_MIHOMO_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "mihomo_ref must be a full lowercase 40-character commit SHA" >&2
+            exit 1
+          fi
+
+          echo "MIHOMO_TAG=$INPUT_MIHOMO_TAG" >> "$GITHUB_ENV"
+          echo "MIHOMO_REF=$INPUT_MIHOMO_REF" >> "$GITHUB_ENV"
+
+      # Установка jq для парсинга JSON и crane
       - name: Install jq and crane
         run: |
           sudo apt-get update
@@ -26,23 +58,6 @@ jobs:
           curl -sL https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_Linux_x86_64.tar.gz | sudo tar -C /usr/local/bin -xz crane
           chmod +x /usr/local/bin/crane
           crane version || { echo "Crane failed to install"; exit 1; }
-
-      # 2. Получаем последний стабильный тег из MetaCubeX/mihomo
-      - name: Get latest stable mihomo tag
-        id: mihomo_tag
-        run: |
-          # Фильтруем только стабильные теги (vX.Y.Z, без -rc, -alpha, -beta)
-          MIHOMO_TAG=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases | \
-            jq -r '[.[] | select(.prerelease == false and .draft == false and (.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")))][0].tag_name')
-          if [ -z "$MIHOMO_TAG" ]; then
-            echo "No stable tag found in MetaCubeX/mihomo"
-            exit 1
-          fi
-          echo "Latest stable mihomo tag: $MIHOMO_TAG"
-          echo "VERSION=$MIHOMO_TAG" >> $GITHUB_ENV
-          
-      - name: Checkout code
-        uses: actions/checkout@v6
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -64,6 +79,32 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to GHCR with crane
+        run: echo "${GITHUB_TOKEN}" | crane auth login ghcr.io -u "${PACKAGE_OWNER}" --password-stdin
+
+      - name: Refuse to overwrite immutable tags
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for tag in "$MIHOMO_TAG" "sha-$MIHOMO_REF"; do
+            image="ghcr.io/${PACKAGE_OWNER}/${PACKAGE_NAME}:${tag}"
+            set +e
+            error=$(crane digest "$image" 2>&1)
+            status=$?
+            set -e
+
+            if [[ $status -eq 0 ]]; then
+              echo "Refusing to overwrite existing immutable tag: $image" >&2
+              exit 1
+            fi
+            if ! grep -Eiq 'MANIFEST_UNKNOWN|NAME_UNKNOWN' <<< "$error"; then
+              echo "Could not prove that immutable tag is absent: $image" >&2
+              echo "$error" >&2
+              exit 1
+            fi
+          done
+
       # 5. Устанавливаем переменные
       - name: Set variables
         id: vars
@@ -79,15 +120,13 @@ jobs:
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
           build-args: |
-            TAG=${{ env.VERSION }}
+            MIHOMO_TAG=${{ env.MIHOMO_TAG }}
+            MIHOMO_REF=${{ env.MIHOMO_REF }}
             BUILDTIME=${{ env.BUILDTIME }}
             AMD64VERSION=v3
           tags: |
-            ghcr.io/alexanderek/mikrotik-mihomo-fakeip:latest
-            ghcr.io/alexanderek/mikrotik-mihomo-fakeip:${{ env.VERSION }}
-
-      - name: Log in to GHCR with crane
-        run: echo "${GITHUB_TOKEN}" | crane auth login ghcr.io -u ${PACKAGE_OWNER} --password-stdin
+            ghcr.io/${{ env.PACKAGE_OWNER }}/${{ env.PACKAGE_NAME }}:${{ env.MIHOMO_TAG }}
+            ghcr.io/${{ env.PACKAGE_OWNER }}/${{ env.PACKAGE_NAME }}:sha-${{ env.MIHOMO_REF }}
 
       - name: Analyze GHCR packages (dry-run)
         id: analyze

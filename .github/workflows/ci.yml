@@ -21,3 +21,62 @@ jobs:
 
       - name: Smoke-test entrypoint config generation
         run: tests/entrypoint-smoke.sh
+
+      - name: Validate fail-closed release contract
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          grep -Fq 'mihomo_tag:' .github/workflows/manual_push.yml
+          grep -Fq 'mihomo_ref:' .github/workflows/manual_push.yml
+          grep -Fq 'MIHOMO_TAG=$''{{ env.MIHOMO_TAG }}' .github/workflows/manual_push.yml
+          grep -Fq 'MIHOMO_REF=$''{{ env.MIHOMO_REF }}' .github/workflows/manual_push.yml
+          grep -Fq 'sha-$''{{ env.MIHOMO_REF }}' .github/workflows/manual_push.yml
+          grep -Fq 'ARG MIHOMO_TAG' Dockerfile
+          grep -Fq 'ARG MIHOMO_REF' Dockerfile
+          grep -Fq 'refs/tags/${MIHOMO_TAG}^{commit}' Dockerfile
+          grep -Fq 'test "$resolved_ref" = "$MIHOMO_REF"' Dockerfile
+          grep -Fq 'org.opencontainers.image.version="$MIHOMO_TAG"' Dockerfile
+          grep -Fq 'org.opencontainers.image.revision="$MIHOMO_REF"' Dockerfile
+          grep -Fq 'Refuse to overwrite immutable tags' .github/workflows/manual_push.yml
+
+          if grep -Fq ':latest' .github/workflows/manual_push.yml README.md; then
+            echo 'Mutable latest image tag is forbidden by the release contract' >&2
+            exit 1
+          fi
+          if grep -Eq '^ARG MIHOMO_(TAG|REF)=' Dockerfile; then
+            echo 'Dockerfile release inputs must not have implicit defaults' >&2
+            exit 1
+          fi
+          if grep -Fq 'MetaCubeX/mihomo/releases' .github/workflows/manual_push.yml; then
+            echo 'Dynamic upstream release selection is forbidden' >&2
+            exit 1
+          fi
+
+          synthetic_repo=$(mktemp -d)
+          trap 'rm -rf "$synthetic_repo"' EXIT
+          git -C "$synthetic_repo" init -q
+          git -C "$synthetic_repo" config user.name ci
+          git -C "$synthetic_repo" config user.email ci@example.invalid
+          printf '%s\n' synthetic > "$synthetic_repo/source.txt"
+          git -C "$synthetic_repo" add source.txt
+          git -C "$synthetic_repo" commit -qm synthetic
+          git -C "$synthetic_repo" tag v1.2.3
+
+          validate_pair() {
+            tag=$1
+            expected_ref=$2
+            resolved_ref=$(git -C "$synthetic_repo" rev-parse --verify "refs/tags/${tag}^{commit}") || return 1
+            test "$resolved_ref" = "$expected_ref"
+          }
+
+          matching_ref=$(git -C "$synthetic_repo" rev-parse HEAD)
+          validate_pair v1.2.3 "$matching_ref"
+          if validate_pair v1.2.3 '0000000000000000000000000000000000000000'; then
+            echo 'Synthetic mismatched ref unexpectedly passed' >&2
+            exit 1
+          fi
+          if validate_pair v9.9.9 "$matching_ref" >/dev/null 2>&1; then
+            echo 'Synthetic unresolved tag unexpectedly passed' >&2
+            exit 1
+          fi

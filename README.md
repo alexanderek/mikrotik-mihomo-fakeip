@@ -1,61 +1,123 @@
 # mikrotik-mihomo-fakeip
-> Maintained fork of an archived upstream project.
-> Original repository is archived; this fork continues maintenance and documentation updates.
 
-This repository provides a Mihomo build with an integrated configuration, designed for deployment on MikroTik RouterOS via containerization, utilizing DNS static forwarding and the native RouterOS tunneling features.
+> Поддерживаемый форк архивированного исходного проекта. Репозиторий продолжает
+> сопровождение контейнерной обвязки, а Mihomo при сборке берётся из
+> [MetaCubeX/mihomo](https://github.com/MetaCubeX/mihomo).
 
-## Environment variables
+Репозиторий собирает Mihomo со встроенной генерацией конфигурации для запуска
+в контейнере MikroTik RouterOS. Контейнер выдаёт fake-IP через DNS, принимает
+возвращённый на него трафик в режиме TUN или TPROXY и передаёт его напрямую.
+Настройка конкретного маршрутизатора и его фактическое состояние не являются
+источником истины этого репозитория.
 
-The container currently supports these environment variables:
+## Модель релиза
 
-| Variable | What it does | Default | Example |
+У релиза нет автоматически выбранной «последней» версии upstream. Исходный код
+каждой сборки задаётся обязательной парой ручных входов workflow
+`.github/workflows/manual_push.yml`:
+
+- `mihomo_tag` — стабильный тег upstream строго в формате `vX.Y.Z`;
+- `mihomo_ref` — полный 40-символьный lowercase SHA коммита, на который должен
+  разрешаться этот тег.
+
+`Dockerfile` разрешает именно `refs/tags/<mihomo_tag>^{commit}` и прекращает
+сборку, если тег отсутствует, SHA имеет неверный формат или пара не совпадает.
+В собранный образ записываются OCI labels `org.opencontainers.image.version`
+и `org.opencontainers.image.revision`.
+
+Последняя пара, которую можно подтвердить только локальной историей этого
+репозитория (`Dockerfile` в теге репозитория `v0.1.2`):
+
+```text
+v1.19.26
+fc8c5a24b16991f98cd736950c17d1aa306a5041
+```
+
+Это запись в metadata репозитория, а не утверждение о текущем содержимом
+upstream или GHCR. Для нового релиза оператор отдельно проверяет актуальную
+пару и явно вводит оба значения.
+
+Workflow публикует только два адресуемых тега одного multi-arch manifest:
+
+```text
+ghcr.io/alexanderek/mikrotik-mihomo-fakeip:<mihomo_tag>
+ghcr.io/alexanderek/mikrotik-mihomo-fakeip:sha-<full_mihomo_ref>
+```
+
+Перед публикацией workflow проверяет отсутствие обоих тегов в GHCR и
+fail-closed завершает работу при существующем теге или если отсутствие нельзя
+доказать. Mutable-тег `latest` не создаётся и не является контрактом
+развёртывания.
+
+### Ручной выпуск и проверка
+
+1. В upstream определите стабильный `vX.Y.Z` и полный SHA коммита, на который
+   разрешается этот тег. Не используйте branch, сокращённый SHA или prerelease.
+2. Запустите `Manual Build and Publish Multi-Arch Docker Images` через
+   `workflow_dispatch` и введите оба значения без преобразований.
+3. Убедитесь, что шаг `Validate release inputs` завершился успешно, а сборка не
+   сообщила `does not resolve` или `expected MIHOMO_REF`.
+4. После публикации проверьте, что version-тег и `sha-<full_mihomo_ref>` указывают
+   на один manifest digest, а OCI labels содержат введённые version и revision.
+5. Для развёртывания зафиксируйте `sha-<full_mihomo_ref>` либо manifest digest.
+   Version-тег остаётся удобным указателем на ту же неизменяемую сборку.
+
+Обновление выполняется выпуском новой проверенной пары, проверкой нового образа
+в безопасном контуре и явной заменой закреплённого SHA/digest в принадлежащей
+маршрутизатору конфигурации. Для отката верните предыдущий сохранённый
+`sha-<full_mihomo_ref>` или digest; повторный push поверх прежнего тега workflow
+запрещает.
+
+## Переменные окружения
+
+Контейнер поддерживает следующие переменные:
+
+| Переменная | Назначение | Значение по умолчанию | Пример |
 |---|---|---|---|
-| `FAKE_IP_RANGE` | Fake-IP pool used by `dns.fake-ip-range` | `198.18.0.0/15` | `198.18.0.0/15` |
-| `FAKE_IP_TTL` | Fake-IP TTL used by `dns.fake-ip-ttl` | `1` | `60` |
-| `LOGLEVEL` | Mihomo `log-level` in generated config | `error` | `warning` |
-| `FAKE_IP_FILTER` | Optional CSV list converted to a YAML-quoted `dns.fake-ip-filter` list | empty | `localhost,*.lan,*.local` |
-| `NAMESERVER_POLICY` | Optional CSV `domain#dns` list converted to `dns.nameserver-policy` | empty | `*.example.com#tls://9.9.9.9:853` |
-| `BLOCK_QUIC` | Optional UDP/443 reject policy in Mihomo rules | `off` | `youtube` |
-| `INBOUND_MODE` | Inbound mode selector: `auto`, `tun`, or `tproxy` | `auto` | `tproxy` |
+| `FAKE_IP_RANGE` | Пул fake-IP для `dns.fake-ip-range` | `198.18.0.0/15` | `198.18.0.0/15` |
+| `FAKE_IP_TTL` | TTL fake-IP для `dns.fake-ip-ttl` | `1` | `60` |
+| `LOGLEVEL` | Значение `log-level` в конфигурации Mihomo | `error` | `warning` |
+| `FAKE_IP_FILTER` | Необязательный CSV-список для YAML-массива `dns.fake-ip-filter` | пусто | `localhost,*.lan,*.local` |
+| `NAMESERVER_POLICY` | Необязательный CSV-список `domain#dns` для `dns.nameserver-policy` | пусто | `*.example.com#tls://9.9.9.9:853` |
+| `BLOCK_QUIC` | Необязательная политика блокировки UDP/443 в правилах Mihomo | `off` | `youtube` |
+| `INBOUND_MODE` | Режим входящего трафика: `auto`, `tun` или `tproxy` | `auto` | `tproxy` |
 
-`198.18.0.0/15` is the reserved RFC2544 benchmarking range and is Mihomo's
-default fake-ip pool. Avoid RFC1918 ranges such as `10.0.0.0/8` for fake IPs:
-they can overlap real LAN/VPN addresses.
+`198.18.0.0/15` — зарезервированный RFC2544 диапазон для тестов и стандартный
+fake-IP pool Mihomo. Не используйте для fake-IP диапазоны RFC1918, например
+`10.0.0.0/8`: они могут пересечься с адресами LAN или VPN.
 
-Current generated DNS defaults (fixed in `entrypoint.sh`, no env override):
-- `dns.listen: 0.0.0.0:53`
-- `dns.enhanced-mode: fake-ip`
-- `dns.default-nameserver: [8.8.8.8, 9.9.9.9, 1.1.1.1]`
-- `ipv6: false`
+Фиксированные DNS-параметры, которые генерирует `entrypoint.sh`:
 
-## DNS listener contract
+- `dns.listen: 0.0.0.0:53`;
+- `dns.enhanced-mode: fake-ip`;
+- `dns.default-nameserver: [8.8.8.8, 9.9.9.9, 1.1.1.1]`;
+- `ipv6: false`.
 
-The container listens for DNS on `0.0.0.0:53`, which means RouterOS reaches it
-on the container interface IP. In `enhanced-mode: fake-ip`, matching downstream
-DNS forwarder queries receive addresses from `FAKE_IP_RANGE`.
+## Контракт DNS listener
 
-Downstream RouterOS DNS forwarders and health checks should target the container
-interface IP and should expect fake-ip answers inside `FAKE_IP_RANGE`.
+Контейнер слушает DNS на `0.0.0.0:53`. В режиме `enhanced-mode: fake-ip`
+запросы, переданные downstream DNS forwarder, получают адреса из
+`FAKE_IP_RANGE`.
 
-WG egress-failover integration puts this container into a single egress routing
-table and is documented separately in the `wg-failover` repository. The
-standalone `fakeip` routing table below is an illustration for independent
-deployments, not the failover integration contract.
+DNS forwarder и проверки должны обращаться к IP контейнерного интерфейса и
+ожидать fake-IP внутри `FAKE_IP_RANGE`.
 
-## NAMESERVER_POLICY (dns.nameserver-policy)
+Интеграция с WG egress failover помещает контейнер в одну egress routing table
+и документирована отдельно в репозитории `wg-failover`. Таблица `fakeip` ниже —
+пример самостоятельного развёртывания, а не контракт failover-интеграции.
 
-Format:
+## NAMESERVER_POLICY
+
+Формат:
 
 ```bash
 NAMESERVER_POLICY="domain1#dns1,domain2#dns2"
 ```
 
-- Elements are separated by commas.
-- Inside each element, exactly one `#` separates `domain` and upstream `dns`.
-- Empty `domain` or `dns` values are rejected during container startup.
-- Upstream examples: `1.1.1.1`, `tls://9.9.9.9:853`.
-
-Examples:
+- Элементы разделяются запятыми.
+- Внутри элемента ровно один `#` отделяет `domain` от upstream `dns`.
+- Пустые `domain` и `dns` отклоняются при старте контейнера.
+- Допустимые примеры upstream: `1.1.1.1`, `tls://9.9.9.9:853`.
 
 ```bash
 NAMESERVER_POLICY="*.example.com#tls://9.9.9.9:853"
@@ -63,56 +125,50 @@ NAMESERVER_POLICY="service.example#tls://9.9.9.9:853,updates.example.net#tls://9
 NAMESERVER_POLICY="video.example#1.1.1.1,*.example.org#1.1.1.1"
 ```
 
-> **Note**: Invalid `NAMESERVER_POLICY` entries stop startup instead of generating a broken configuration.
+Некорректный элемент `NAMESERVER_POLICY` останавливает запуск вместо генерации
+невалидной конфигурации.
 
 ## BLOCK_QUIC
 
-`BLOCK_QUIC` controls optional UDP/443 reject rules in the generated Mihomo
-config. It is disabled by default and is unrelated to failover decisions.
+`BLOCK_QUIC` управляет необязательными reject-правилами UDP/443. По умолчанию
+политика отключена и не участвует в выборе failover.
 
-- `off`: do not reject QUIC.
-- `youtube`: reject UDP/443 only for `DOMAIN-SUFFIX,googlevideo.com`. This can
-  force TCP fallback for YouTube/video traffic through a tunnel.
-- `all`: reject all UDP/443 traffic.
+- `off` — не блокировать QUIC;
+- `youtube` — блокировать UDP/443 только для
+  `DOMAIN-SUFFIX,googlevideo.com`, чтобы трафик мог перейти на TCP;
+- `all` — блокировать весь UDP/443.
 
-The same policy is applied in both `tun` and `tproxy` inbound modes.
+Политика одинакова для режимов `tun` и `tproxy`.
 
 ## INBOUND_MODE
 
-`INBOUND_MODE` controls how the container chooses the Mihomo inbound mode:
+- `auto` — выбрать `tproxy`, если внутри контейнера виден `nft_tproxy`, иначе
+  выбрать `tun`;
+- `tun` — принудительно использовать TUN;
+- `tproxy` — принудительно использовать nftables TPROXY.
 
-- `auto`: use the legacy runtime heuristic and select `tproxy` when `nft_tproxy`
-  is visible from inside the container; otherwise select `tun`.
-- `tun`: force TUN inbound.
-- `tproxy`: force nftables TPROXY inbound.
+## Пример конфигурации RouterOS
 
-## Example Usage
+Следующие команды — шаблон самостоятельного развёртывания, а не описание
+текущего состояния какого-либо маршрутизатора. Перед применением замените
+примерные адреса и закрепите проверенный SHA-тег образа.
 
-This example demonstrates how to integrate the `mikrotik-mihomo-fakeip` container with MikroTik RouterOS to enable fake DNS forwarding. Fake IPs are issued for specific domains, routed back to the container, and outgoing traffic can be directed to any destination (including standard RouterOS tunnels).
+### 1. Создать контейнерный интерфейс
 
-### 1. Create a container interface
-
-```bash
+```routeros
 /interface/veth/add name=fakeip address=192.168.255.1/31 gateway=192.168.255.0
-```
-
-### 2. Assign the interface address to MikroTik
-
-```bash
 /ip/address/add address=192.168.255.0/31 interface=fakeip
 ```
 
-### 3. Create DNS forwarders with the container’s IP address
+### 2. Создать DNS forwarder
 
-```bash
+```routeros
 /ip/dns/forwarders/add name=fakeip dns-servers=192.168.255.1 verify-doh-cert=no
 ```
 
-### 4. Add environment variables
+### 3. Добавить переменные окружения
 
-Set required variables, then optionally add `FAKE_IP_FILTER` and `NAMESERVER_POLICY`:
-
-```bash
+```routeros
 /container/envs
 add key=FAKE_IP_RANGE list=fakeip value=198.18.0.0/15
 add key=LOGLEVEL list=fakeip value=error
@@ -122,24 +178,25 @@ add key=FAKE_IP_FILTER list=fakeip value="localhost,*.lan,*.local"
 add key=NAMESERVER_POLICY list=fakeip value="*.example.com#tls://9.9.9.9:853"
 ```
 
-### 5. Pull and run the container
+### 4. Добавить контейнер с закреплённым образом
 
-```bash
-/container/add remote-image="ghcr.io/alexanderek/mikrotik-mihomo-fakeip:latest" envlists=fakeip interface=fakeip root-dir=Containers/fakeip start-on-boot=yes
+```routeros
+/container/add remote-image="ghcr.io/alexanderek/mikrotik-mihomo-fakeip:sha-<FULL_40_CHARACTER_MIHOMO_REF>" envlists=fakeip interface=fakeip root-dir=Containers/fakeip start-on-boot=yes
 ```
 
-> **Note**: Depending on RouterOS version, CLI may show `envlists` or `envlist`; use tab-completion.
-> **Note**: Published tags are `latest` and versioned `vX.Y.Z` multi-arch images. The amd64 image is built with `GOAMD64=v3` for modern x86_64 systems, `linux/arm64` targets RB5009, and `linux/arm/v7` targets RB4011.
+В зависимости от версии RouterOS CLI может показывать `envlists` или `envlist`;
+проверяйте доступный параметр через tab-completion. Workflow собирает
+`linux/amd64` с `GOAMD64=v3`, а также `linux/arm64` и `linux/arm/v7`.
 
-### 6. Add a route for fake IPs to the container’s gateway
+### 5. Добавить маршрут для fake-IP
 
-```bash
+```routeros
 /ip/route/add dst-address=198.18.0.0/15 gateway=192.168.255.1
 ```
 
-### 7. Create a DNS address list to exclude from routing
+### 6. Исключить upstream DNS из дальнейшей маршрутизации
 
-```bash
+```routeros
 /ip/firewall/address-list
 add address=1.1.1.1 list=DNS
 add address=9.9.9.9 list=DNS
@@ -150,81 +207,48 @@ add address=8.8.8.8 list=DNS
 add address=8.8.4.4 list=DNS
 ```
 
-> **Note**: This list prevents routing loops by excluding upstream DNS servers from further routing.
+### 7. Создать routing table и mangle rules
 
-### 8. Add a routing table for container traffic
-
-```bash
+```routeros
 /routing/table/add name=fakeip fib
-```
-
-### 9. Example mangle rules
-
-```bash
 /ip/firewall/mangle
 add action=mark-connection chain=prerouting connection-mark=no-mark dst-address-list=!DNS dst-address-type=!local new-connection-mark=fakeip src-address=192.168.255.1
 add action=mark-routing chain=prerouting connection-mark=fakeip in-interface=fakeip new-routing-mark=fakeip passthrough=no
 ```
 
-### 10. Add domains for fake IP resolution
+### 8. Передать выбранные домены в контейнер
 
-```bash
+```routeros
 /ip/dns/static/add type=FWD forward-to=fakeip match-subdomain=yes name=video.example
 /ip/dns/static/add type=FWD forward-to=fakeip match-subdomain=yes name=service.example
 /ip/dns/static/add type=FWD forward-to=fakeip match-subdomain=yes name=updates.example.net
 ```
 
-> **Note**: Repeat this command for additional domains that should resolve to fake IPs.
+Для исходящего трафика таблице нужен маршрут через выбранный gateway:
 
-### 11. Summary and final configuration
-
-This configuration issues fake IPs for specified domains via `FWD` rules, routes them back to the container, and allows outgoing traffic to be directed anywhere, including standard RouterOS tunnels.
-
-```bash
-/ip/route/add dst-address=0.0.0.0/0 gateway=XXX.XXX.XXX.XXX routing-table=fakeip
+```routeros
+/ip/route/add dst-address=0.0.0.0/0 gateway=<EGRESS_GATEWAY> routing-table=fakeip
 ```
 
-> **Note**: Replace XXX.XXX.XXX.XXX with your actual gateway to complete the routing setup.
+## Проверка контейнера
 
-## Minimal test plan / Verification
+1. Убедитесь, что контейнер запущен.
+2. Проверьте наличие сгенерированного `/root/.config/mihomo/config.yaml` без
+   публикации его потенциально чувствительного содержимого.
+3. Если задан `NAMESERVER_POLICY`, убедитесь, что запуск не завершился ошибкой
+   валидации.
+4. С клиентского устройства запросите через DNS маршрутизатора тестовый домен,
+   который попадает под `type=FWD`, и проверьте, что ответ находится внутри
+   `FAKE_IP_RANGE`.
+5. Для HTTP end-to-end проверки можно использовать `neverssl.com`: он работает
+   по plain HTTP и не добавляет неоднозначности от HTTPS redirect или CDN.
 
-1. Start the container and confirm it is running:
+Пример прямого запроса к контейнеру и HTTP-запроса на полученный fake-IP:
 
-```bash
-/container/print where name~"mihomo"
-```
-
-2. Confirm config exists inside the container:
-
-```bash
-/container/shell <container-id-or-name>
-cat /root/.config/mihomo/config.yaml
-```
-
-3. If `NAMESERVER_POLICY` is set, confirm `nameserver-policy:` is present in `config.yaml`.
-
-4. From a client device in your LAN, query the router DNS and verify domains matched by your `type=FWD` rules return fake IPs (this is expected behavior in fake-ip mode). Replace `<ROUTER_DNS_IP>` with your router's DNS IP (LAN IP).
-
-```bash
-# Client device commands:
-# Windows:
-nslookup service.example <ROUTER_DNS_IP>
-# Linux/macOS:
-dig @<ROUTER_DNS_IP> service.example
-
-# RouterOS DNS cache check:
-/ip dns cache print where name~"service.example"
-```
-
-5. For a live HTTP end-to-end check, prefer `neverssl.com`. It is intentionally plain HTTP and avoids confusing failures from HTTPS redirects or CDN behavior.
-
-```bash
-# RouterOS DNS direct-to-container check:
+```routeros
 :put [:resolve neverssl.com server=<CONTAINER_IP>]
-
-# RouterOS fake-ip traffic check:
-# Replace <FAKE_IP> with the address returned by the resolve command.
 /tool/fetch url="http://<FAKE_IP>/" http-header-field="Host: neverssl.com" output=none duration=15s
 ```
 
-The returned fake IP should be inside `FAKE_IP_RANGE`, and Mihomo logs should show a TCP flow to `neverssl.com:80`.
+Полученный адрес должен входить в `FAKE_IP_RANGE`, а логи Mihomo — содержать TCP
+flow к `neverssl.com:80`.
