@@ -190,7 +190,15 @@ jobs:
             protected_digests[$digest]=1
             echo "  📦 Inspecting manifest for tags: [$tags]"
             for tag in $(_jq '.metadata.container.tags[]' | sort -u); do
-              manifest_json=$(timeout 10s crane manifest ghcr.io/${PACKAGE_OWNER}/${PACKAGE_NAME}:${tag} 2>/dev/null || echo "{}")
+              manifest_image="ghcr.io/${PACKAGE_OWNER}/${PACKAGE_NAME}:${tag}"
+              if ! manifest_json=$(timeout 10s crane manifest "$manifest_image" 2>/dev/null); then
+                echo "Unable to inspect tagged manifest: $manifest_image" >&2
+                exit 1
+              fi
+              if ! echo "$manifest_json" | jq -e '.manifests | type == "array" and length > 0' >/dev/null; then
+                echo "Tagged image is not a non-empty multi-arch manifest: $manifest_image" >&2
+                exit 1
+              fi
               sub_digests=$(echo "$manifest_json" | jq -r '.manifests[].digest // empty')
               for sd in $sub_digests; do
                 if [[ -n "$sd" ]]; then

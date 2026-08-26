@@ -39,6 +39,8 @@ jobs:
           grep -Fq 'org.opencontainers.image.version="$MIHOMO_TAG"' Dockerfile
           grep -Fq 'org.opencontainers.image.revision="$MIHOMO_REF"' Dockerfile
           grep -Fq 'Refuse to overwrite immutable tags' .github/workflows/manual_push.yml
+          grep -Fq 'Unable to inspect tagged manifest' .github/workflows/manual_push.yml
+          grep -Fq 'Tagged image is not a non-empty multi-arch manifest' .github/workflows/manual_push.yml
 
           if grep -Fq ':latest' .github/workflows/manual_push.yml README.md; then
             echo 'Mutable latest image tag is forbidden by the release contract' >&2
@@ -50,6 +52,10 @@ jobs:
           fi
           if grep -Fq 'MetaCubeX/mihomo/releases' .github/workflows/manual_push.yml; then
             echo 'Dynamic upstream release selection is forbidden' >&2
+            exit 1
+          fi
+          if grep -F 'crane manifest' .github/workflows/manual_push.yml | grep -Fq '|| echo "{}"'; then
+            echo 'Tagged manifest inspection must not replace failures with an empty manifest' >&2
             exit 1
           fi
 

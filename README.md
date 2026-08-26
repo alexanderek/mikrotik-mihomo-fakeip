@@ -62,11 +62,33 @@ fail-closed завершает работу при существующем те
 5. Для развёртывания зафиксируйте `sha-<full_mihomo_ref>` либо manifest digest.
    Version-тег остаётся удобным указателем на ту же неизменяемую сборку.
 
+После публикации workflow анализирует GHCR и при `DELETE_UNTAGGED=true` удаляет
+untagged package versions, которые не распознаны как manifest или его child
+digest. Tagged manifests и связанные с ними platform images исключаются из
+удаления. Это provider-side cleanup без rollback для удалённой untagged version;
+ошибка чтения package inventory или tagged manifest останавливает cleanup, а
+непрочитанная отдельная untagged version исключается из списка удаления.
+
 Обновление выполняется выпуском новой проверенной пары, проверкой нового образа
 в безопасном контуре и явной заменой закреплённого SHA/digest в принадлежащей
 маршрутизатору конфигурации. Для отката верните предыдущий сохранённый
 `sha-<full_mihomo_ref>` или digest; повторный push поверх прежнего тега workflow
 запрещает.
+
+### Локальная проверка source contract
+
+Objective gate не требует RouterOS, Docker или доступа к upstream. Он проверяет
+shell-код и синтетически запускает генерацию конфигурации:
+
+```bash
+shellcheck entrypoint.sh tests/entrypoint-smoke.sh
+tests/entrypoint-smoke.sh
+```
+
+`shellcheck` является prerequisite CI и локально может отсутствовать; skipped
+ShellCheck нельзя считать успешной проверкой. Smoke test использует task-local
+stubs, проверяет `tun`/`tproxy`, QUIC policies, fake-IP filter,
+`NAMESERVER_POLICY` и fail-closed отказ на некорректной policy.
 
 ## Переменные окружения
 
@@ -146,6 +168,18 @@ NAMESERVER_POLICY="video.example#1.1.1.1,*.example.org#1.1.1.1"
   выбрать `tun`;
 - `tun` — принудительно использовать TUN;
 - `tproxy` — принудительно использовать nftables TPROXY.
+
+Перед запуском Mihomo entrypoint выбирает нужный набор `iptables-legacy` или
+`nftables`. Если пакета нет в образе, он выполняет `apk add`; при переходе на
+`nftables` удаляет `iptables` и `iptables-legacy`. Поэтому такой старт зависит
+от доступности Alpine package repository и fail-closed завершается при ошибке
+package switch.
+
+В режиме `tproxy` каждый старт выполняет `nft flush ruleset` внутри контейнера,
+затем создаёт собственную таблицу `mihomo_tproxy`, policy routing rule и local
+route. Не размещайте в том же контейнере независимые nftables rules: entrypoint
+их удалит. Для отката верните закреплённый предыдущий image tag/digest; runtime
+настройки конкретного RouterOS остаются в owning router repository.
 
 ## Пример конфигурации RouterOS
 
