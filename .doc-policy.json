@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "repo_types": [
+    "deployable-application",
+    "cli"
+  ],
+  "bundle": {
+    "version": "1.0.0",
+    "sha256": "486f7fa3e5e0db655e187d4457a79623efa10a0d1da0e6a8b69aedcea44ce6ae"
+  },
+  "docs": [
+    "README.md"
+  ],
+  "required_evidence": [],
+  "evidence": [],
+  "local_targets": [],
+  "baseline_mode": "full"
+}
