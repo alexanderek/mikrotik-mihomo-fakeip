@@ -4,8 +4,12 @@
     "deployable-application"
   ],
   "bundle": {
-    "version": "1.0.3",
-    "sha256": "f2b6d56a51a6f7fc0c61c5c614d17e8cf6d171fa5f27df7ee07d47d3e971825c"
+    "version": "1.0.4",
+    "sha256": "8e4526496b30d454037a154617508643d1b17ca0cf885553cab04c8204bf81e4"
+  },
+  "readme_language": {
+    "policy": "russian",
+    "reviewed_sha256": "3c5e0f510ff6574b3989d704eff29f2c632312adf8f8acf67e36a5fad34a7464"
   },
   "docs": [
     "README.md"
