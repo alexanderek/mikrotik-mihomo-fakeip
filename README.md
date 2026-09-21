@@ -45,9 +45,8 @@ ghcr.io/alexanderek/mikrotik-mihomo-fakeip:sha-<full_mihomo_ref>
 ```
 
 Перед публикацией workflow проверяет отсутствие обоих тегов в GHCR и
-fail-closed завершает работу при существующем теге или если отсутствие нельзя
-доказать. Mutable-тег `latest` не создаётся и не является контрактом
-развёртывания.
+останавливается, если тег уже есть или его отсутствие нельзя
+доказать. Тег `latest` не создаётся и для развёртывания не используется.
 
 ### Ручной выпуск и проверка
 
@@ -63,11 +62,11 @@ fail-closed завершает работу при существующем те
    Version-тег остаётся удобным указателем на ту же неизменяемую сборку.
 
 После публикации workflow анализирует GHCR и при `DELETE_UNTAGGED=true` удаляет
-untagged package versions, которые не распознаны как manifest или его child
-digest. Tagged manifests и связанные с ними platform images исключаются из
-удаления. Это provider-side cleanup без rollback для удалённой untagged version;
-ошибка чтения package inventory или tagged manifest останавливает cleanup, а
-непрочитанная отдельная untagged version исключается из списка удаления.
+версии пакета без тега, которые не распознаны как manifest или его дочерний
+digest. Manifest с тегом и связанные с ним platform images не удаляются.
+Удаление происходит на стороне GHCR и не откатывается; ошибка чтения списка
+пакетов или manifest с тегом останавливает очистку, а непрочитанная версия без
+тега в список удаления не попадает.
 
 Обновление выполняется выпуском новой проверенной пары, проверкой нового образа
 в безопасном контуре и явной заменой закреплённого SHA/digest в принадлежащей
@@ -75,9 +74,9 @@ digest. Tagged manifests и связанные с ними platform images ис�
 `sha-<full_mihomo_ref>` или digest; повторный push поверх прежнего тега workflow
 запрещает.
 
-### Локальная проверка source contract
+### Локальная проверка исходников
 
-Objective gate не требует RouterOS, Docker или доступа к upstream. Он проверяет
+Проверка не требует RouterOS, Docker или доступа к upstream. Она читает
 shell-код и синтетически запускает генерацию конфигурации:
 
 ```bash
@@ -85,10 +84,10 @@ shellcheck entrypoint.sh tests/entrypoint-smoke.sh
 tests/entrypoint-smoke.sh
 ```
 
-`shellcheck` является prerequisite CI и локально может отсутствовать; skipped
-ShellCheck нельзя считать успешной проверкой. Smoke test использует task-local
-stubs, проверяет `tun`/`tproxy`, QUIC policies, fake-IP filter,
-`NAMESERVER_POLICY` и fail-closed отказ на некорректной policy.
+`shellcheck` обязателен в CI, локально может отсутствовать; пропущенный
+`shellcheck` — не пройденная проверка. Smoke-тест работает на локальных
+заглушках, проверяет `tun`/`tproxy`, политики QUIC, фильтр fake-IP,
+`NAMESERVER_POLICY` и отказ при некорректной политике.
 
 ## Переменные окружения
 
@@ -125,8 +124,7 @@ DNS forwarder и проверки должны обращаться к IP кон
 ожидать fake-IP внутри `FAKE_IP_RANGE`.
 
 Интеграция с WG egress failover помещает контейнер в одну egress routing table
-и документирована отдельно в репозитории `wg-failover`. Таблица `fakeip` ниже —
-пример самостоятельного развёртывания, а не контракт failover-интеграции.
+и документирована отдельно в репозитории `wg-failover`.
 
 ## NAMESERVER_POLICY
 
@@ -172,97 +170,22 @@ NAMESERVER_POLICY="video.example#1.1.1.1,*.example.org#1.1.1.1"
 Перед запуском Mihomo entrypoint выбирает нужный набор `iptables-legacy` или
 `nftables`. Если пакета нет в образе, он выполняет `apk add`; при переходе на
 `nftables` удаляет `iptables` и `iptables-legacy`. Поэтому такой старт зависит
-от доступности Alpine package repository и fail-closed завершается при ошибке
-package switch.
+от доступности репозитория пакетов Alpine и завершается ошибкой, если сменить
+пакеты не удалось.
 
 В режиме `tproxy` каждый старт выполняет `nft flush ruleset` внутри контейнера,
 затем создаёт собственную таблицу `mihomo_tproxy`, policy routing rule и local
 route. Не размещайте в том же контейнере независимые nftables rules: entrypoint
-их удалит. Для отката верните закреплённый предыдущий image tag/digest; runtime
-настройки конкретного RouterOS остаются в owning router repository.
+их удалит. Для отката верните предыдущий закреплённый тег или digest образа;
+настройки конкретного RouterOS живут в каталоге роутера.
 
-## Пример конфигурации RouterOS
+## Настройка RouterOS
 
-Следующие команды — шаблон самостоятельного развёртывания, а не описание
-текущего состояния какого-либо маршрутизатора. Перед применением замените
-примерные адреса и закрепите проверенный SHA-тег образа.
-
-### 1. Создать контейнерный интерфейс
-
-```routeros
-/interface/veth/add name=fakeip address=192.168.255.1/31 gateway=192.168.255.0
-/ip/address/add address=192.168.255.0/31 interface=fakeip
-```
-
-### 2. Создать DNS forwarder
-
-```routeros
-/ip/dns/forwarders/add name=fakeip dns-servers=192.168.255.1 verify-doh-cert=no
-```
-
-### 3. Добавить переменные окружения
-
-```routeros
-/container/envs
-add key=FAKE_IP_RANGE list=fakeip value=198.18.0.0/15
-add key=LOGLEVEL list=fakeip value=error
-add key=FAKE_IP_TTL list=fakeip value=1
-add key=BLOCK_QUIC list=fakeip value=off
-add key=FAKE_IP_FILTER list=fakeip value="localhost,*.lan,*.local"
-add key=NAMESERVER_POLICY list=fakeip value="*.example.com#tls://9.9.9.9:853"
-```
-
-### 4. Добавить контейнер с закреплённым образом
-
-```routeros
-/container/add remote-image="ghcr.io/alexanderek/mikrotik-mihomo-fakeip:sha-<FULL_40_CHARACTER_MIHOMO_REF>" envlists=fakeip interface=fakeip root-dir=Containers/fakeip start-on-boot=yes
-```
-
-В зависимости от версии RouterOS CLI может показывать `envlists` или `envlist`;
-проверяйте доступный параметр через tab-completion. Workflow собирает
-`linux/amd64` с `GOAMD64=v3`, а также `linux/arm64` и `linux/arm/v7`.
-
-### 5. Добавить маршрут для fake-IP
-
-```routeros
-/ip/route/add dst-address=198.18.0.0/15 gateway=192.168.255.1
-```
-
-### 6. Исключить upstream DNS из дальнейшей маршрутизации
-
-```routeros
-/ip/firewall/address-list
-add address=1.1.1.1 list=DNS
-add address=9.9.9.9 list=DNS
-add address=149.112.112.112 list=DNS
-add address=104.16.248.249 list=DNS
-add address=104.16.249.249 list=DNS
-add address=8.8.8.8 list=DNS
-add address=8.8.4.4 list=DNS
-```
-
-### 7. Создать routing table и mangle rules
-
-```routeros
-/routing/table/add name=fakeip fib
-/ip/firewall/mangle
-add action=mark-connection chain=prerouting connection-mark=no-mark dst-address-list=!DNS dst-address-type=!local new-connection-mark=fakeip src-address=192.168.255.1
-add action=mark-routing chain=prerouting connection-mark=fakeip in-interface=fakeip new-routing-mark=fakeip passthrough=no
-```
-
-### 8. Передать выбранные домены в контейнер
-
-```routeros
-/ip/dns/static/add type=FWD forward-to=fakeip match-subdomain=yes name=video.example
-/ip/dns/static/add type=FWD forward-to=fakeip match-subdomain=yes name=service.example
-/ip/dns/static/add type=FWD forward-to=fakeip match-subdomain=yes name=updates.example.net
-```
-
-Для исходящего трафика таблице нужен маршрут через выбранный gateway:
-
-```routeros
-/ip/route/add dst-address=0.0.0.0/0 gateway=<EGRESS_GATEWAY> routing-table=fakeip
-```
+Настройка роутера в этом репозитории не хранится. Применённое состояние —
+`/Users/ak/IT/hl/network/mikrotik/routers/<роутер>/export.rsc`, порядок
+действий — `operations.md` рядом с ним. Интеграция с failover описана в
+репозитории `wg-failover`. Образ закрепляйте по `sha-<full_mihomo_ref>`
+или digest, не по version-тегу.
 
 ## Проверка контейнера
 
