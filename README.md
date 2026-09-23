@@ -58,8 +58,9 @@ ghcr.io/alexanderek/mikrotik-mihomo-fakeip:sha-<full_mihomo_ref>
    сообщила `does not resolve` или `expected MIHOMO_REF`.
 4. После публикации проверьте, что version-тег и `sha-<full_mihomo_ref>` указывают
    на один manifest digest, а OCI labels содержат введённые version и revision.
-5. Для развёртывания зафиксируйте `sha-<full_mihomo_ref>` либо manifest digest.
-   Version-тег остаётся удобным указателем на ту же неизменяемую сборку.
+5. Для развёртывания закрепляйте точный version-тег (`vX.Y.Z`), как везде в
+   HL: workflow не перевыпускает существующий тег, поэтому он неизменяем.
+   `sha-<full_mihomo_ref>` указывает на ту же сборку и тоже годится.
 
 После публикации workflow анализирует GHCR и при `DELETE_UNTAGGED=true` удаляет
 версии пакета без тега, которые не распознаны как manifest или его дочерний
@@ -183,8 +184,8 @@ route. Не размещайте в том же контейнере незав�
 
 Настройка роутера в этом репозитории не хранится: она живёт в репозитории
 состояния роутеров рядом с его `operations.md`. Интеграция с failover описана в
-репозитории `wg-failover`. Образ закрепляйте по `sha-<full_mihomo_ref>`
-или digest, не по version-тегу.
+репозитории `wg-failover`. Образ закрепляйте по точному version-тегу
+(допустим и `sha-<full_mihomo_ref>`), не по `latest`.
 
 ## Проверка контейнера
 
